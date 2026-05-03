@@ -1,0 +1,10 @@
+.DS_Store
+.trae/
+backend/.env
+backend/node_modules/
+coverage/
+dist/
+build/
+project.private.config.json
+**/xcuserdata/
+*.xcuserstate
