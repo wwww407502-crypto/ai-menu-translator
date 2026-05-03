@@ -2,16 +2,35 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const multer = require('multer');
+const crypto = require('crypto');
 const { OpenAI } = require('openai');
 const axios = require('axios');
-const { CURRENCY_CODES, CURRENCY_METADATA } = require('../miniprogram/utils/currency-data');
+const { CURRENCY_CODES, CURRENCY_METADATA } = require('./shared/currency-data');
 
 const app = express();
 const port = Number(process.env.PORT) || 3000;
 const supportedCurrencyCodes = new Set(CURRENCY_CODES);
 const defaultTargetLanguages = ['zh-CN', 'zh-TW', 'en', 'ja', 'ko'];
+const defaultCorsAllowedOrigins = [
+    'http://localhost:3000',
+    'http://localhost:5173',
+    'http://127.0.0.1:3000',
+    'http://127.0.0.1:5173'
+];
 const allowedTargetLanguages = new Set(
     (process.env.ALLOWED_TARGET_LANGUAGES || defaultTargetLanguages.join(','))
+        .split(',')
+        .map((value) => value.trim())
+        .filter(Boolean)
+);
+const corsAllowedOrigins = new Set(
+    (process.env.CORS_ALLOWED_ORIGINS || defaultCorsAllowedOrigins.join(','))
+        .split(',')
+        .map((value) => value.trim())
+        .filter(Boolean)
+);
+const configuredApiKeys = new Set(
+    (process.env.API_KEYS || '')
         .split(',')
         .map((value) => value.trim())
         .filter(Boolean)
@@ -22,8 +41,47 @@ const maxUploadBytes = Number(process.env.MAX_UPLOAD_BYTES || 5 * 1024 * 1024);
 const exchangeRateTimeoutMs = Number(process.env.EXCHANGE_RATE_TIMEOUT_MS || 5000);
 const ocrTimeoutMs = Number(process.env.OCR_TIMEOUT_MS || 20000);
 const parseTimeoutMs = Number(process.env.PARSE_TIMEOUT_MS || 30000);
+const requestTimeoutMs = Number(process.env.REQUEST_TIMEOUT_MS || Math.max(parseTimeoutMs + 5000, 35000));
+const headerTimeoutMs = Number(process.env.HEADER_TIMEOUT_MS || requestTimeoutMs + 1000);
+const keepAliveTimeoutMs = Number(process.env.KEEP_ALIVE_TIMEOUT_MS || 5000);
+const maxConcurrentParses = Number(process.env.MAX_CONCURRENT_PARSES || 4);
+const generalRateLimitWindowMs = Number(process.env.GENERAL_RATE_LIMIT_WINDOW_MS || 60000);
+const generalRateLimitMaxRequests = Number(process.env.GENERAL_RATE_LIMIT_MAX_REQUESTS || 120);
+const parseRateLimitWindowMs = Number(process.env.PARSE_RATE_LIMIT_WINDOW_MS || 60000);
+const parseRateLimitMaxRequests = Number(process.env.PARSE_RATE_LIMIT_MAX_REQUESTS || 10);
+const trustProxySetting = typeof process.env.TRUST_PROXY === 'string'
+    ? process.env.TRUST_PROXY.trim()
+    : '';
+const rateLimitStores = {
+    general: new Map(),
+    parse: new Map()
+};
+let activeParseRequests = 0;
 
-app.use(cors());
+if (trustProxySetting) {
+    app.set('trust proxy', trustProxySetting === 'true' ? true : trustProxySetting);
+}
+
+app.use((req, res, next) => {
+    req.requestId = createRequestId();
+    res.setHeader('X-Request-Id', req.requestId);
+    next();
+});
+app.use(cors({
+    origin(origin, callback) {
+        if (!origin) {
+            callback(null, true);
+            return;
+        }
+
+        if (corsAllowedOrigins.has(origin)) {
+            callback(null, true);
+            return;
+        }
+
+        callback(new HttpError(403, 'CORS_ORIGIN_FORBIDDEN', 'Origin is not allowed by CORS.'));
+    }
+}));
 app.use(express.json({ limit: requestJsonLimit }));
 
 const openai = new OpenAI({
@@ -74,6 +132,92 @@ class UpstreamServiceError extends HttpError {
         super(statusCode, errorCode, message, details);
         this.name = 'UpstreamServiceError';
     }
+}
+
+function createRequestId() {
+    return crypto.randomBytes(8).toString('hex');
+}
+
+function getClientIdentifier(req) {
+    return toTrimmedString(req.ip)
+        || toTrimmedString(req.headers['x-forwarded-for'])
+        || toTrimmedString(req.socket && req.socket.remoteAddress)
+        || 'unknown';
+}
+
+function pruneExpiredRateLimitEntries(store, now) {
+    if (store.size < 1024) {
+        return;
+    }
+
+    for (const [key, entry] of store.entries()) {
+        if (!entry || entry.resetAt <= now) {
+            store.delete(key);
+        }
+    }
+}
+
+function createRateLimitMiddleware({ store, windowMs, maxRequests, scope }) {
+    return (req, res, next) => {
+        const now = Date.now();
+        pruneExpiredRateLimitEntries(store, now);
+        const clientId = getClientIdentifier(req);
+        const key = `${scope}:${clientId}`;
+        const existingEntry = store.get(key);
+        const entry = existingEntry && existingEntry.resetAt > now
+            ? existingEntry
+            : { count: 0, resetAt: now + windowMs };
+
+        entry.count += 1;
+        store.set(key, entry);
+
+        res.setHeader('X-RateLimit-Limit', String(maxRequests));
+        res.setHeader('X-RateLimit-Remaining', String(Math.max(0, maxRequests - entry.count)));
+        res.setHeader('X-RateLimit-Reset', String(Math.ceil(entry.resetAt / 1000)));
+
+        if (entry.count > maxRequests) {
+            next(new HttpError(429, 'RATE_LIMITED', 'Too many requests. Please try again later.'));
+            return;
+        }
+
+        next();
+    };
+}
+
+function requireApiKeyIfConfigured(req, res, next) {
+    if (!configuredApiKeys.size) {
+        next();
+        return;
+    }
+
+    const apiKey = toTrimmedString(req.get('x-api-key'));
+    if (!apiKey || !configuredApiKeys.has(apiKey)) {
+        next(new HttpError(401, 'UNAUTHORIZED', 'Missing or invalid API key.'));
+        return;
+    }
+
+    next();
+}
+
+function enforceParseConcurrency(req, res, next) {
+    if (activeParseRequests >= maxConcurrentParses) {
+        next(new HttpError(503, 'PARSE_CAPACITY_EXCEEDED', 'Menu parsing service is busy. Please retry shortly.'));
+        return;
+    }
+
+    activeParseRequests += 1;
+    let released = false;
+    const release = () => {
+        if (released) {
+            return;
+        }
+        released = true;
+        activeParseRequests = Math.max(0, activeParseRequests - 1);
+    };
+
+    res.on('finish', release);
+    res.on('close', release);
+    next();
 }
 
 function isSupportedCurrency(value) {
@@ -184,6 +328,18 @@ function createUploadMiddleware() {
 }
 
 const upload = createUploadMiddleware();
+const generalRateLimitMiddleware = createRateLimitMiddleware({
+    store: rateLimitStores.general,
+    windowMs: generalRateLimitWindowMs,
+    maxRequests: generalRateLimitMaxRequests,
+    scope: 'general'
+});
+const parseRateLimitMiddleware = createRateLimitMiddleware({
+    store: rateLimitStores.parse,
+    windowMs: parseRateLimitWindowMs,
+    maxRequests: parseRateLimitMaxRequests,
+    scope: 'parse'
+});
 
 function toTrimmedString(value) {
     return typeof value === 'string' ? value.trim() : '';
@@ -1430,7 +1586,7 @@ app.get('/health', (req, res) => {
     res.json({ ok: true });
 });
 
-app.get('/api/v1/exchange-rate', async (req, res, next) => {
+app.get('/api/v1/exchange-rate', requireApiKeyIfConfigured, generalRateLimitMiddleware, async (req, res, next) => {
     try {
         const fromCurrency = ensureSupportedCurrency(req.query.from || 'USD', 'from');
         const toCurrency = ensureSupportedCurrency(req.query.to || 'CNY', 'to');
@@ -1454,71 +1610,78 @@ app.get('/api/v1/exchange-rate', async (req, res, next) => {
     }
 });
 
-app.post('/api/v1/menu/parse', upload.single('image'), async (req, res, next) => {
-    try {
-        validateUploadedImage(req.file);
+app.post(
+    '/api/v1/menu/parse',
+    requireApiKeyIfConfigured,
+    parseRateLimitMiddleware,
+    enforceParseConcurrency,
+    upload.single('image'),
+    async (req, res, next) => {
+        try {
+            validateUploadedImage(req.file);
 
-        const targetLang = ensureAllowedTargetLanguage(req.body && req.body.targetLang);
-        const targetCurrency = ensureSupportedCurrency((req.body && req.body.targetCurrency) || 'CNY', 'targetCurrency');
+            const targetLang = ensureAllowedTargetLanguage(req.body && req.body.targetLang);
+            const targetCurrency = ensureSupportedCurrency((req.body && req.body.targetCurrency) || 'CNY', 'targetCurrency');
 
-        const base64Image = req.file.buffer.toString('base64');
-        const mimeType = normalizeUploadedMimeType(req.file.mimetype);
+            const base64Image = req.file.buffer.toString('base64');
+            const mimeType = normalizeUploadedMimeType(req.file.mimetype);
 
-        const rawOcrText = await requestTextCompletion(buildOcrEvidenceMessages(base64Image, mimeType), ocrModel, {
-            enableThinking: false,
-            timeoutMs: ocrTimeoutMs
-        });
-        const ocrEvidence = normalizeOcrEvidence(rawOcrText);
-        const aiResponse = await requestJsonCompletion(buildEvidenceParseMessages(ocrEvidence, targetLang), {
-            model: visionModel,
-            enableThinking: parseEnableThinking,
-            thinkingBudget: parseThinkingBudget,
-            timeoutMs: parseTimeoutMs
-        });
-        const sourceLanguage = aiResponse.sourceLanguage || (ocrEvidence.sourceLanguage !== 'unknown' ? ocrEvidence.sourceLanguage : inferSourceLanguage(aiResponse.items || []));
-        const originalCurrency = resolveOriginalCurrency(aiResponse.originalCurrency, ocrEvidence.originalCurrency);
-        if (!originalCurrency) {
-            throw new UpstreamServiceError('Parser did not return a supported original currency.', 'UNSUPPORTED_ORIGINAL_CURRENCY');
+            const rawOcrText = await requestTextCompletion(buildOcrEvidenceMessages(base64Image, mimeType), ocrModel, {
+                enableThinking: false,
+                timeoutMs: ocrTimeoutMs
+            });
+            const ocrEvidence = normalizeOcrEvidence(rawOcrText);
+            const aiResponse = await requestJsonCompletion(buildEvidenceParseMessages(ocrEvidence, targetLang), {
+                model: visionModel,
+                enableThinking: parseEnableThinking,
+                thinkingBudget: parseThinkingBudget,
+                timeoutMs: parseTimeoutMs
+            });
+            const sourceLanguage = aiResponse.sourceLanguage || (ocrEvidence.sourceLanguage !== 'unknown' ? ocrEvidence.sourceLanguage : inferSourceLanguage(aiResponse.items || []));
+            const originalCurrency = resolveOriginalCurrency(aiResponse.originalCurrency, ocrEvidence.originalCurrency);
+            if (!originalCurrency) {
+                throw new UpstreamServiceError('Parser did not return a supported original currency.', 'UNSUPPORTED_ORIGINAL_CURRENCY');
+            }
+            let items = Array.isArray(aiResponse.items) ? aiResponse.items : [];
+
+            const exchangeRate = await resolveExchangeRate(originalCurrency, targetCurrency);
+
+            items = items.map((item, index) => normalizeParsedItem(item, index, exchangeRate, originalCurrency));
+            items = reconcileItemsWithOcrEvidence(items, ocrEvidence, exchangeRate, originalCurrency);
+            const globalAddOns = inferGlobalAddOns(aiResponse, exchangeRate, originalCurrency);
+            const originalCurrencyMeta = {
+                code: originalCurrency,
+                fractionDigits: getCurrencyFractionDigits(originalCurrency)
+            };
+            const targetCurrencyCode = normalizeCurrencyCode(targetCurrency);
+            const targetCurrencyMeta = {
+                code: targetCurrencyCode,
+                fractionDigits: getCurrencyFractionDigits(targetCurrencyCode)
+            };
+            const globalPromotionText = normalizeGlobalPromotionText(
+                aiResponse.globalPromotionText
+                || aiResponse.globalAddOnText
+                || aiResponse.footerText
+                || ocrEvidence.footerLines.join(' / ')
+            );
+
+            res.json({
+                sourceLanguage,
+                originalCurrency,
+                targetCurrency,
+                originalCurrencyMeta,
+                targetCurrencyMeta,
+                exchangeRate,
+                globalPromotionText,
+                globalAddOns,
+                items
+            });
+
+        } catch (error) {
+            next(error);
         }
-        let items = Array.isArray(aiResponse.items) ? aiResponse.items : [];
-
-        const exchangeRate = await resolveExchangeRate(originalCurrency, targetCurrency);
-
-        items = items.map((item, index) => normalizeParsedItem(item, index, exchangeRate, originalCurrency));
-        items = reconcileItemsWithOcrEvidence(items, ocrEvidence, exchangeRate, originalCurrency);
-        const globalAddOns = inferGlobalAddOns(aiResponse, exchangeRate, originalCurrency);
-        const originalCurrencyMeta = {
-            code: originalCurrency,
-            fractionDigits: getCurrencyFractionDigits(originalCurrency)
-        };
-        const targetCurrencyCode = normalizeCurrencyCode(targetCurrency);
-        const targetCurrencyMeta = {
-            code: targetCurrencyCode,
-            fractionDigits: getCurrencyFractionDigits(targetCurrencyCode)
-        };
-        const globalPromotionText = normalizeGlobalPromotionText(
-            aiResponse.globalPromotionText
-            || aiResponse.globalAddOnText
-            || aiResponse.footerText
-            || ocrEvidence.footerLines.join(' / ')
-        );
-
-        res.json({
-            sourceLanguage,
-            originalCurrency,
-            targetCurrency,
-            originalCurrencyMeta,
-            targetCurrencyMeta,
-            exchangeRate,
-            globalPromotionText,
-            globalAddOns,
-            items
-        });
-
-    } catch (error) {
-        next(error);
     }
-});
+);
 
 app.use((error, req, res, next) => {
     if (res.headersSent) {
@@ -1545,7 +1708,8 @@ app.use((error, req, res, next) => {
     if (error instanceof HttpError) {
         const payload = {
             error: error.message,
-            code: error.errorCode
+            code: error.errorCode,
+            requestId: req.requestId
         };
         if (error.details) {
             payload.details = error.details;
@@ -1555,20 +1719,53 @@ app.use((error, req, res, next) => {
     }
 
     console.error('Unhandled backend error:', {
+        requestId: req.requestId,
         message: error && error.message,
         code: error && error.code,
         stack: error && error.stack
     });
     res.status(500).json({
         error: 'Internal server error.',
-        code: 'INTERNAL_SERVER_ERROR'
+        code: 'INTERNAL_SERVER_ERROR',
+        requestId: req.requestId
     });
 });
 
+function resetRuntimeState() {
+    activeParseRequests = 0;
+    Object.values(rateLimitStores).forEach((store) => store.clear());
+}
+
+let processHandlersRegistered = false;
+function registerProcessHandlers() {
+    if (processHandlersRegistered) {
+        return;
+    }
+
+    processHandlersRegistered = true;
+    process.on('unhandledRejection', (error) => {
+        console.error('Unhandled promise rejection:', {
+            message: error && error.message,
+            stack: error && error.stack
+        });
+    });
+    process.on('uncaughtException', (error) => {
+        console.error('Uncaught exception:', {
+            message: error && error.message,
+            stack: error && error.stack
+        });
+    });
+}
+
 function startServer(listenPort = port) {
-    return app.listen(listenPort, () => {
+    registerProcessHandlers();
+    const server = app.listen(listenPort, () => {
         console.log(`Backend listening on port ${listenPort}`);
     });
+    server.requestTimeout = requestTimeoutMs;
+    server.headersTimeout = headerTimeoutMs;
+    server.keepAliveTimeout = keepAliveTimeoutMs;
+    return server;
 }
 
 if (require.main === module) {
@@ -1590,5 +1787,8 @@ module.exports = {
     requestTextCompletion,
     resolveExchangeRate,
     resolveOriginalCurrency,
+    resetRuntimeState,
+    requireApiKeyIfConfigured,
+    registerProcessHandlers,
     validateUploadedImage
 };
