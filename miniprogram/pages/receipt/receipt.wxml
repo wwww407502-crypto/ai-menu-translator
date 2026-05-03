@@ -1,0 +1,64 @@
+<view class="receipt-page safe-page">
+  <view class="receipt-shell">
+    <view class="hero">
+      <text class="hero__title">{{titleText}}</text>
+    </view>
+
+    <view class="hero-divider">
+      <view class="hero-divider__cap hero-divider__cap--left"></view>
+      <view class="hero-divider__line"></view>
+      <view class="hero-divider__cap hero-divider__cap--right"></view>
+    </view>
+
+    <view class="order-card">
+      <view class="order-row" wx:for="{{receiptItems}}" wx:key="id">
+        <view class="order-row__names">
+          <text class="order-row__title">{{item.title}}</text>
+          <text class="order-row__summary">{{item.waiterSummary}}</text>
+          <text class="order-row__detail" wx:for="{{item.detailLines}}" wx:key="*this">{{item}}</text>
+        </view>
+      </view>
+    </view>
+
+    <view class="gratitude">
+      <text class="gratitude__title">{{thanksText}}</text>
+    </view>
+
+    <view class="detail-card">
+      <view class="detail-card__head">
+        <view class="detail-card__titles">
+          <text class="detail-card__label">{{detailLabelText}}</text>
+          <text class="detail-card__hint">{{detailHintText}}</text>
+        </view>
+        <text class="detail-card__action" bindtap="copyOrderText">{{copyActionText}}</text>
+      </view>
+      <view class="detail-card__order-list">
+        <text class="detail-card__order-line" wx:for="{{receiptItems}}" wx:key="id">{{item.detailOrderText}}</text>
+      </view>
+      <view class="detail-card__totals">
+        <view class="detail-card__total-block">
+          <text class="detail-card__total-label">{{originalCurrency}}</text>
+          <text class="detail-card__total-value">{{originalAmountText}}</text>
+        </view>
+        <view class="detail-card__total-block detail-card__total-block--secondary">
+          <text class="detail-card__total-label">{{targetCurrency}}</text>
+          <text class="detail-card__total-value">{{convertedAmountText}}</text>
+        </view>
+      </view>
+      <view class="detail-card__meta">
+        <text>{{receiptCode}}</text>
+        <text>{{printedAt}}</text>
+      </view>
+    </view>
+  </view>
+
+  <view class="bottom-dock">
+    <view class="bottom-dock__summary">
+      <text class="bottom-dock__count">{{itemCountLabel}}</text>
+    </view>
+    <view class="bottom-dock__action" bindtap="copyOrderText">
+      <text class="bottom-dock__action-dot"></text>
+      <text class="bottom-dock__action-text">{{copyActionText}}</text>
+    </view>
+  </view>
+</view>

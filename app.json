@@ -1,0 +1,16 @@
+{
+  "pages": [
+    "miniprogram/pages/index/index",
+    "miniprogram/pages/menu/menu",
+    "miniprogram/pages/receipt/receipt"
+  ],
+  "window": {
+    "navigationBarTitleText": "AI 菜单",
+    "navigationBarBackgroundColor": "#ffffff",
+    "navigationBarTextStyle": "black",
+    "backgroundColor": "#f6f6f6",
+    "backgroundTextStyle": "dark"
+  },
+  "style": "v2",
+  "sitemapLocation": "sitemap.json"
+}

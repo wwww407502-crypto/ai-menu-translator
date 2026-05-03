@@ -1,0 +1,279 @@
+<view class="menu-page safe-page">
+  <view class="store-card">
+    <view class="store-card__main">
+      <text class="store-card__name">{{copy.identifyMenu}}</text>
+      <text class="store-card__meta">{{sourceCurrencyName}} → {{targetCurrencyName}} · {{copy.exchangeRate}} {{exchangeRate}}</text>
+    </view>
+    <view class="store-card__actions">
+      <view class="store-card__action store-card__action--currency" bindtap="openCurrencySheet">
+        <view class="store-card__action-copy">
+          <text class="store-card__action-label">{{copy.currencySettings}}</text>
+          <text class="store-card__action-value">{{sourceCurrencyName}} → {{targetCurrencyName}}</text>
+        </view>
+        <text class="store-card__action-arrow">›</text>
+      </view>
+      <view class="store-card__badge" bindtap="toggleSearch">
+        <text>{{isSearching ? copy.collapseSearch : copy.search}}</text>
+      </view>
+    </view>
+  </view>
+
+  <view class="search" wx:if="{{isSearching}}">
+    <input class="search__input" value="{{searchText}}" bindinput="onSearchInput" placeholder="{{copy.searchPlaceholder}}" confirm-type="search" />
+    <view class="search__clear" wx:if="{{searchText}}" bindtap="clearSearch">{{copy.clear}}</view>
+  </view>
+
+  <view class="warning" wx:if="{{lastError}}">
+    <text class="warning__label">{{copy.backendHint}}</text>
+    <text class="warning__text">{{lastError}}</text>
+  </view>
+
+  <view class="warning warning--rule" wx:if="{{showGlobalRuleCard}}">
+    <text class="warning__label">{{copy.globalAddOnRule}}</text>
+    <text class="warning__text" wx:if="{{globalAddOnSummary}}">{{globalAddOnSummary}}</text>
+    <text class="warning__text" wx:if="{{visibleGlobalPromotionText}}">{{copy.promotionSource}}: {{visibleGlobalPromotionText}}</text>
+  </view>
+
+  <view class="menu-shell">
+    <scroll-view class="category-rail" scroll-y enhanced show-scrollbar="{{false}}">
+      <view class="category-rail__inner">
+        <view
+          wx:for="{{categories}}"
+          wx:key="*this"
+          class="category {{selectedCategory == item ? 'category--active' : ''}}"
+          data-category="{{item}}"
+          bindtap="selectCategory"
+        >
+          <text class="category__text">{{item}}</text>
+        </view>
+      </view>
+    </scroll-view>
+
+    <scroll-view class="items" scroll-y enhanced>
+      <view class="empty" wx:if="{{!visibleItems.length}}">
+        <text>{{copy.emptyItems}}</text>
+      </view>
+
+      <view class="section" wx:else>
+        <view class="section__heading">
+          <text class="section__title">{{selectedCategory}}</text>
+          <text class="section__subtitle">{{visibleItems.length}} {{copy.dishCountSuffix}}</text>
+        </view>
+
+        <view class="menu-card" wx:for="{{visibleItems}}" wx:key="id">
+          <view class="dish-thumb">
+            <text class="dish-thumb__label">{{item.itemTypeLabel}}</text>
+          </view>
+
+          <view class="menu-row__body">
+            <view class="menu-row__meta">
+              <text class="translated">{{item.translatedName}}</text>
+              <text class="original">{{item.originalName}}</text>
+              <view class="meta-chips">
+                <text class="meta-chip">{{item.itemTypeLabel}}</text>
+                <text class="meta-chip meta-chip--muted" wx:if="{{item.rawPromotionText && item.parseMode !== 'structured'}}">{{copy.promotionFallback}}</text>
+                <text class="meta-chip meta-chip--muted" wx:if="{{item.parseMode === 'partial'}}">{{copy.pendingRuleConfirmation}}</text>
+              </view>
+              <text class="promo-line" wx:if="{{item.promotionSummary}}">{{item.promotionSummary}}</text>
+              <view class="promo-block" wx:if="{{item.tierRows.length}}">
+                <view class="promo-block__row" wx:for="{{item.tierRows}}" wx:key="id">
+                  <text class="promo-block__label">{{item.labelText}}</text>
+                  <text class="promo-block__value">{{targetCurrency}} {{item.convertedPriceText}} / {{originalCurrency}} {{item.originalPriceText}}</text>
+                </view>
+              </view>
+              <text class="promo-line" wx:if="{{item.bundleSummaryText}}">{{copy.bundleIncludes}}: {{item.bundleSummaryText}}</text>
+              <text class="promo-line" wx:if="{{item.addOnSummaryText}}">{{copy.addOnRule}}: {{item.addOnSummaryText}}</text>
+              <text class="promo-line" wx:if="{{item.bonusSummaryText}}">{{copy.bonusRule}}: {{item.bonusSummaryText}}</text>
+              <text class="promo-line promo-line--dim" wx:if="{{item.rawPromotionText}}">{{copy.promotionSource}}: {{item.rawPromotionText}}</text>
+            </view>
+
+            <view class="menu-row__footer">
+              <view class="price-line">
+                <text class="converted">{{item.pricePrefixText ? item.pricePrefixText + ' ' : ''}}{{targetCurrency}} {{item.convertedPriceText}}</text>
+                <text class="original-price">{{originalCurrency}} {{item.originalPriceText}}</text>
+              </view>
+
+              <view class="stepper" wx:if="{{item.isDirectStepper}}">
+                <view class="stepper__button stepper__button--ghost" wx:if="{{item.quantity}}" data-id="{{item.id}}" bindtap="removeFromCart">−</view>
+                <text class="quantity" wx:if="{{item.quantity}}">{{item.quantity}}</text>
+                <view class="stepper__button" data-id="{{item.id}}" bindtap="addToCart">＋</view>
+              </view>
+
+              <view class="selector-entry" wx:else>
+                <text class="selector-entry__count" wx:if="{{item.quantity}}">{{copy.total}} {{item.quantity}}</text>
+                <view class="selector-entry__button" data-id="{{item.id}}" bindtap="openSelector">{{item.purchaseButtonText}}</view>
+              </view>
+            </view>
+          </view>
+        </view>
+      </view>
+    </scroll-view>
+  </view>
+
+  <view class="cart-bar" wx:if="{{cart.length}}">
+    <view class="cart-bar__tap" bindtap="openCartSheet">
+      <view class="cart-icon">
+        <text class="cart-icon__count">{{cartBadgeCount}}</text>
+      </view>
+      <view class="cart-total">
+        <text class="cart-total__label">{{copy.cartSummary}}</text>
+        <text class="cart-total__main">{{targetCurrency}} {{totalConvertedText}}</text>
+        <text class="cart-total__sub">{{originalCurrency}} {{totalOriginalText}}</text>
+      </view>
+      <text class="cart-bar__chevron">︿</text>
+    </view>
+    <view class="order-button" catchtap="openReceipt">{{copy.generateReceipt}}</view>
+  </view>
+
+  <view class="currency-sheet-mask" wx:if="{{currencySheetVisible}}" catchtap="closeCurrencySheet">
+    <view class="currency-sheet" catchtap="noop">
+      <view class="currency-sheet__grabber"></view>
+      <view class="currency-sheet__head">
+        <view class="currency-sheet__titles">
+          <text class="currency-sheet__title">{{copy.currencySettings}}</text>
+          <text class="currency-sheet__hint">{{copy.currencySettingsHint}}</text>
+        </view>
+        <view class="currency-sheet__close" bindtap="closeCurrencySheet">×</view>
+      </view>
+
+      <view class="currency-sheet__preview">
+        <text class="currency-sheet__preview-text">{{draftSourceCurrencyName}} → {{draftTargetCurrencyName}}</text>
+      </view>
+
+      <view class="currency-sheet__panel">
+        <picker mode="selector" range="{{currencyOptions}}" range-key="name" value="{{draftSourceCurrencyIndex}}" bindchange="onDraftSourceCurrencyChange">
+          <view class="currency-picker-row">
+            <view class="currency-picker-row__meta">
+              <text class="currency-picker-row__label">{{copy.sourceCurrency}}</text>
+              <text class="currency-picker-row__value">{{draftSourceCurrencyName}}</text>
+            </view>
+            <text class="currency-picker-row__arrow">›</text>
+          </view>
+        </picker>
+
+        <view class="currency-sheet__swap" bindtap="swapCurrencyDraft">
+          <text class="currency-sheet__swap-icon">⇅</text>
+          <text class="currency-sheet__swap-text">{{copy.swapCurrencies}}</text>
+        </view>
+
+        <picker mode="selector" range="{{currencyOptions}}" range-key="name" value="{{draftTargetCurrencyIndex}}" bindchange="onDraftTargetCurrencyChange">
+          <view class="currency-picker-row currency-picker-row--accent">
+            <view class="currency-picker-row__meta">
+              <text class="currency-picker-row__label">{{copy.targetCurrency}}</text>
+              <text class="currency-picker-row__value">{{draftTargetCurrencyName}}</text>
+            </view>
+            <text class="currency-picker-row__arrow">›</text>
+          </view>
+        </picker>
+      </view>
+
+      <view class="currency-sheet__footer">
+        <view class="currency-sheet__cancel" bindtap="closeCurrencySheet">{{copy.cancel}}</view>
+        <view class="currency-sheet__confirm" bindtap="confirmCurrencySheet">{{copy.applyCurrencySettings}}</view>
+      </view>
+    </view>
+  </view>
+
+  <view class="cart-sheet-mask" wx:if="{{cartSheetVisible}}" catchtap="closeCartSheet">
+    <view class="cart-sheet" catchtap="noop">
+      <view class="cart-sheet__grabber"></view>
+      <view class="cart-sheet__head">
+        <view class="cart-sheet__titles">
+          <text class="cart-sheet__title">{{copy.cartSummary}}</text>
+          <text class="cart-sheet__hint">{{copy.cartSummaryHint}}</text>
+        </view>
+        <view class="cart-sheet__close" bindtap="closeCartSheet">×</view>
+      </view>
+
+      <scroll-view class="cart-sheet__list" scroll-y enhanced>
+        <view class="cart-entry" wx:for="{{cartSummaryItems}}" wx:key="id">
+          <view class="cart-entry__meta">
+            <text class="cart-entry__title">{{item.title}}</text>
+            <text class="cart-entry__original" wx:if="{{item.originalTitle && item.originalTitle !== item.title}}">{{item.originalTitle}}</text>
+            <text class="cart-entry__detail" wx:for="{{item.detailLines}}" wx:key="*this">{{item}}</text>
+            <text class="cart-entry__detail cart-entry__detail--strong">{{item.unitPriceText}}</text>
+            <text class="cart-entry__detail cart-entry__detail--strong">{{item.subtotalText}}</text>
+            <text class="cart-entry__detail">{{item.originalSubtotalText}}</text>
+          </view>
+
+          <view class="stepper">
+            <view class="stepper__button stepper__button--ghost" data-order-id="{{item.id}}" bindtap="decrementCartEntry">−</view>
+            <text class="quantity">{{item.quantity}}</text>
+            <view class="stepper__button" data-order-id="{{item.id}}" bindtap="incrementCartEntry">＋</view>
+          </view>
+        </view>
+      </scroll-view>
+
+      <view class="cart-sheet__footer">
+        <view class="cart-sheet__totals">
+          <text class="cart-sheet__totals-label">{{copy.total}}</text>
+          <text class="cart-sheet__totals-main">{{targetCurrency}} {{totalConvertedText}}</text>
+          <text class="cart-sheet__totals-sub">{{originalCurrency}} {{totalOriginalText}}</text>
+        </view>
+        <view class="cart-sheet__action" bindtap="openReceipt">{{copy.generateReceipt}}</view>
+      </view>
+    </view>
+  </view>
+
+  <view class="selector-mask" wx:if="{{selectorVisible}}" catchtap="closeSelector">
+    <view class="selector-sheet" catchtap="noop">
+      <view class="selector-sheet__head">
+        <view class="selector-sheet__titles">
+          <text class="selector-sheet__title">{{selectorItem.translatedName}}</text>
+          <text class="selector-sheet__subtitle">{{selectorItem.originalName}}</text>
+        </view>
+        <text class="selector-sheet__badge">{{selectorItemTypeLabel}}</text>
+      </view>
+
+      <text class="selector-sheet__summary" wx:if="{{selectorItem.promotionSummary}}">{{selectorItem.promotionSummary}}</text>
+      <text class="selector-sheet__line" wx:if="{{selectorBundleSummaryText}}">{{copy.bundleIncludes}}: {{selectorBundleSummaryText}}</text>
+      <text class="selector-sheet__line" wx:if="{{selectorBonusSummaryText}}">{{copy.bonusRule}}: {{selectorBonusSummaryText}}</text>
+      <text class="selector-sheet__line" wx:if="{{selectorItem.rawPromotionText}}">{{copy.promotionSource}}: {{selectorItem.rawPromotionText}}</text>
+
+      <view class="selector-sheet__section" wx:if="{{selectorTierRows.length}}">
+        <text class="selector-sheet__section-title">{{copy.selectedTier}}</text>
+        <view
+          class="selector-option {{item.selected ? 'selector-option--active' : ''}}"
+          wx:for="{{selectorTierRows}}"
+          wx:key="id"
+          data-tier-id="{{item.id}}"
+          bindtap="selectTier"
+        >
+          <view class="selector-option__meta">
+            <text class="selector-option__title">{{item.labelText}}</text>
+            <text class="selector-option__price">{{targetCurrency}} {{item.convertedPriceText}} / {{originalCurrency}} {{item.originalPriceText}}</text>
+          </view>
+        </view>
+      </view>
+
+      <view class="selector-sheet__section" wx:if="{{selectorAddOnRows.length}}">
+        <text class="selector-sheet__section-title">{{copy.addOnRule}}</text>
+        <view
+          class="selector-option selector-option--addon {{item.selected ? 'selector-option--active' : ''}} {{item.required ? 'selector-option--locked' : ''}}"
+          wx:for="{{selectorAddOnRows}}"
+          wx:key="id"
+          data-add-on-id="{{item.id}}"
+          bindtap="toggleAddOn"
+        >
+          <view class="selector-option__meta">
+            <text class="selector-option__title">{{item.labelText}}</text>
+            <text class="selector-option__price">+ {{targetCurrency}} {{item.convertedDeltaText}} / {{originalCurrency}} {{item.originalDeltaText}}</text>
+          </view>
+          <text class="selector-option__lock" wx:if="{{item.required}}">*</text>
+        </view>
+      </view>
+
+      <view class="selector-sheet__footer">
+        <view class="selector-sheet__price">
+          <text class="selector-sheet__price-label">{{copy.finalAmount}}</text>
+          <text class="selector-sheet__price-main">{{targetCurrency}} {{selectorPreviewConvertedText}}</text>
+          <text class="selector-sheet__price-sub">{{originalCurrency}} {{selectorPreviewOriginalText}}</text>
+        </view>
+        <view class="selector-sheet__actions">
+          <view class="selector-sheet__cancel" bindtap="closeSelector">{{copy.cancel}}</view>
+          <view class="selector-sheet__confirm" bindtap="confirmSelection">{{copy.confirmSelection}}</view>
+        </view>
+      </view>
+    </view>
+  </view>
+</view>

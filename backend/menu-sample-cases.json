@@ -1,0 +1,37 @@
+[
+  {
+    "id": "plain-menu",
+    "title": "普通菜单",
+    "goal": "验证无优惠、无套餐时仍返回普通单品结构",
+    "expectedSignals": ["single"],
+    "notes": "用于回归普通菜名与价格识别"
+  },
+  {
+    "id": "tiered-pricing-menu",
+    "title": "分档优惠菜单",
+    "goal": "验证同一菜品下多个数量+价格会归并为 tiers",
+    "expectedSignals": ["tiered", "tiers", "rawPromotionText"],
+    "notes": "示例：3个/6个/10个对应不同价格"
+  },
+  {
+    "id": "bundle-menu",
+    "title": "套餐菜单",
+    "goal": "验证包含 セット、ミックス 等标题时优先识别为 bundle",
+    "expectedSignals": ["bundle", "bundleItems", "promotionSummary"],
+    "notes": "示例：混合套餐、双人套餐、炸鸡篮"
+  },
+  {
+    "id": "global-addon-menu",
+    "title": "加购规则菜单",
+    "goal": "验证底部横向追加规则会进入 globalAddOns 或 item.addOns",
+    "expectedSignals": ["addOns", "globalAddOns", "globalPromotionText"],
+    "notes": "示例：追加 1个 220円 / 酱料 +200円"
+  },
+  {
+    "id": "partial-occluded-menu",
+    "title": "模糊遮挡菜单",
+    "goal": "验证无法可靠结构化时返回 partial 与 rawPromotionText，而不是错误降成普通单品",
+    "expectedSignals": ["parseMode:partial", "rawPromotionText"],
+    "notes": "示例：斜拍、遮挡、小字过密"
+  }
+]

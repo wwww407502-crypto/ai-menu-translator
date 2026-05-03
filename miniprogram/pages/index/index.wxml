@@ -1,0 +1,32 @@
+<view class="home safe-page">
+  <view class="home__glow home__glow--one"></view>
+  <view class="home__glow home__glow--two"></view>
+
+  <view class="home__content" wx:if="{{!isProcessing}}">
+    <view class="hero">
+      <text class="hero__title">{{copy.appTitle}}</text>
+    </view>
+
+    <view class="actions">
+      <button class="primary-action" bindtap="takePhoto">
+        <text class="action-title">{{copy.takePhoto}}</text>
+      </button>
+
+      <button class="secondary-action" bindtap="chooseFromAlbum">
+        <text class="action-title">{{copy.importAlbum}}</text>
+      </button>
+    </view>
+
+    <view class="notice" wx:if="{{errorMessage}}">
+      <text class="notice__label">{{copy.notice}}</text>
+      <text class="notice__text">{{errorMessage}}</text>
+    </view>
+  </view>
+
+  <view class="processing" wx:else>
+    <view class="processing__ring"></view>
+    <text class="processing__eyebrow">{{copy.processingEyebrow}}</text>
+    <text class="processing__title">{{copy.processingTitle}}</text>
+    <text class="processing__desc">{{copy.processingDesc}}</text>
+  </view>
+</view>
