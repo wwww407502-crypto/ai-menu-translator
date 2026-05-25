@@ -2,9 +2,13 @@
 .trae/
 backend/.env
 backend/node_modules/
+backend/logs/
 coverage/
 dist/
 build/
 project.private.config.json
 **/xcuserdata/
 *.xcuserstate
+*.png
+*.jpg
+*.jpeg

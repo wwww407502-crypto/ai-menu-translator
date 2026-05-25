@@ -3,6 +3,7 @@
     <view class="store-card__main">
       <text class="store-card__name">{{copy.identifyMenu}}</text>
       <text class="store-card__meta">{{sourceCurrencyName}} → {{targetCurrencyName}} · {{copy.exchangeRate}} {{exchangeRate}}</text>
+      <text class="store-card__pages" wx:if="{{pageCount > 1}}">{{pageCount}} pages merged</text>
     </view>
     <view class="store-card__actions">
       <view class="store-card__action store-card__action--currency" bindtap="openCurrencySheet">
@@ -28,9 +29,15 @@
     <text class="warning__text">{{lastError}}</text>
   </view>
 
+  <view class="warning warning--parse" wx:if="{{parseWarnings.length}}">
+    <text class="warning__label">{{copy.parseNote}}</text>
+    <text class="warning__text" wx:for="{{parseWarnings}}" wx:key="index" wx:for-item="warn">{{warn}}</text>
+  </view>
+
   <view class="warning warning--rule" wx:if="{{showGlobalRuleCard}}">
     <text class="warning__label">{{copy.globalAddOnRule}}</text>
     <text class="warning__text" wx:if="{{globalAddOnSummary}}">{{globalAddOnSummary}}</text>
+    <text class="warning__text" wx:if="{{globalDiscountRuleSummary}}">{{copy.discountRule}}: {{globalDiscountRuleSummary}}</text>
     <text class="warning__text" wx:if="{{visibleGlobalPromotionText}}">{{copy.promotionSource}}: {{visibleGlobalPromotionText}}</text>
   </view>
 
@@ -84,6 +91,7 @@
               <text class="promo-line" wx:if="{{item.bundleSummaryText}}">{{copy.bundleIncludes}}: {{item.bundleSummaryText}}</text>
               <text class="promo-line" wx:if="{{item.addOnSummaryText}}">{{copy.addOnRule}}: {{item.addOnSummaryText}}</text>
               <text class="promo-line" wx:if="{{item.bonusSummaryText}}">{{copy.bonusRule}}: {{item.bonusSummaryText}}</text>
+              <text class="promo-line" wx:if="{{item.discountRuleSummaryText}}">{{copy.discountRule}}: {{item.discountRuleSummaryText}}</text>
               <text class="promo-line promo-line--dim" wx:if="{{item.rawPromotionText}}">{{copy.promotionSource}}: {{item.rawPromotionText}}</text>
             </view>
 
@@ -228,6 +236,7 @@
       <text class="selector-sheet__summary" wx:if="{{selectorItem.promotionSummary}}">{{selectorItem.promotionSummary}}</text>
       <text class="selector-sheet__line" wx:if="{{selectorBundleSummaryText}}">{{copy.bundleIncludes}}: {{selectorBundleSummaryText}}</text>
       <text class="selector-sheet__line" wx:if="{{selectorBonusSummaryText}}">{{copy.bonusRule}}: {{selectorBonusSummaryText}}</text>
+      <text class="selector-sheet__line" wx:if="{{selectorDiscountRuleSummaryText}}">{{copy.discountRule}}: {{selectorDiscountRuleSummaryText}}</text>
       <text class="selector-sheet__line" wx:if="{{selectorItem.rawPromotionText}}">{{copy.promotionSource}}: {{selectorItem.rawPromotionText}}</text>
 
       <view class="selector-sheet__section" wx:if="{{selectorTierRows.length}}">

@@ -30,7 +30,6 @@
           <text class="detail-card__label">{{detailLabelText}}</text>
           <text class="detail-card__hint">{{detailHintText}}</text>
         </view>
-        <text class="detail-card__action" bindtap="copyOrderText">{{copyActionText}}</text>
       </view>
       <view class="detail-card__order-list">
         <text class="detail-card__order-line" wx:for="{{receiptItems}}" wx:key="id">{{item.detailOrderText}}</text>
@@ -55,10 +54,6 @@
   <view class="bottom-dock">
     <view class="bottom-dock__summary">
       <text class="bottom-dock__count">{{itemCountLabel}}</text>
-    </view>
-    <view class="bottom-dock__action" bindtap="copyOrderText">
-      <text class="bottom-dock__action-dot"></text>
-      <text class="bottom-dock__action-text">{{copyActionText}}</text>
     </view>
   </view>
 </view>

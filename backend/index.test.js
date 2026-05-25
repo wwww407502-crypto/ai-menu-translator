@@ -105,6 +105,137 @@ test('ensureSupportedCurrency rejects unsupported values', () => {
     }
 });
 
+test('normalizeParsedItem forces combo-like single items into bundle for Chinese package names', () => {
+    const { backend, restore } = loadBackend();
+    try {
+        const normalized = backend.normalizeParsedItem({
+            category: '主食',
+            originalName: '双人套餐',
+            translatedName: '双人套餐',
+            itemType: 'single',
+            originalPriceText: '88元',
+            originalPrice: 88
+        }, 0, 1, 'CNY');
+
+        assert.equal(normalized.itemType, 'bundle');
+        assert.equal(normalized.pricingType, 'bundle');
+        assert.equal(normalized.parseMode, 'structured');
+        assert.match(normalized.promotionSummary || '', /combo|set/i);
+    } finally {
+        restore();
+    }
+});
+
+test('normalizeParsedItem corrects explicit single itemType for Japanese set meals', () => {
+    const { backend, restore } = loadBackend();
+    try {
+        const normalized = backend.normalizeParsedItem({
+            category: 'セット',
+            originalName: '10個セット',
+            translatedName: '10-piece set',
+            itemType: 'single',
+            originalPriceText: '1600円',
+            originalPrice: 1600,
+            rawPromotionText: '10個セット 1600円'
+        }, 0, 0.049, 'JPY');
+
+        assert.equal(normalized.itemType, 'bundle');
+        assert.equal(normalized.originalPrice, 1600);
+        assert.equal(normalized.convertedPrice, 78.4);
+    } finally {
+        restore();
+    }
+});
+
+test('normalizeParsedItem downgrades empty tiered items to single', () => {
+    const { backend, restore } = loadBackend();
+    try {
+        const normalized = backend.normalizeParsedItem({
+            category: '北海道名物',
+            originalName: 'ももザンギ',
+            translatedName: '鸡腿肉炸',
+            itemType: 'tiered',
+            originalPriceText: '660円',
+            originalPrice: 660,
+            tiers: []
+        }, 0, 0.0436, 'JPY');
+
+        assert.equal(normalized.itemType, 'single');
+        assert.equal(normalized.pricingType, 'single');
+        assert.equal(normalized.parseMode, 'basic');
+        assert.equal(normalized.tiers.length, 0);
+    } finally {
+        restore();
+    }
+});
+
+test('normalizeParsedItem extracts buy-get quantity discount rules', () => {
+    const { backend, restore } = loadBackend();
+    try {
+        const normalized = backend.normalizeParsedItem({
+            category: '小吃',
+            originalName: '炸鸡块',
+            translatedName: '炸鸡块',
+            originalPriceText: '12元',
+            originalPrice: 12,
+            rawPromotionText: '买2送1'
+        }, 0, 1, 'CNY');
+
+        assert.equal(normalized.itemType, 'single');
+        assert.equal(normalized.discountRules.length, 1);
+        assert.equal(normalized.discountRules[0].type, 'buy_x_get_y');
+        assert.equal(normalized.discountRules[0].paidQuantity, 2);
+        assert.equal(normalized.discountRules[0].freeQuantity, 1);
+        assert.equal(normalized.hasStructuredPromotion, true);
+    } finally {
+        restore();
+    }
+});
+
+test('normalizeParsedItem extracts multi-buy fixed price rules from English menus', () => {
+    const { backend, restore } = loadBackend();
+    try {
+        const normalized = backend.normalizeParsedItem({
+            category: 'Tacos',
+            originalName: 'Fish Taco',
+            translatedName: '鱼肉塔可',
+            originalPriceText: '$6.00',
+            originalPrice: 6,
+            rawPromotionText: 'Fish Taco $6.00 / 2 for $10.00'
+        }, 0, 7.2, 'USD');
+
+        assert.equal(normalized.originalPrice, 6);
+        assert.equal(normalized.discountRules.length, 1);
+        assert.equal(normalized.discountRules[0].type, 'bundle_price');
+        assert.equal(normalized.discountRules[0].minQuantity, 2);
+        assert.equal(normalized.discountRules[0].originalPrice, 10);
+        assert.equal(normalized.discountRules[0].convertedPrice, 72);
+    } finally {
+        restore();
+    }
+});
+
+test('normalizeParsedItem extracts second item half price rules', () => {
+    const { backend, restore } = loadBackend();
+    try {
+        const normalized = backend.normalizeParsedItem({
+            category: '饮品',
+            originalName: '奶茶',
+            translatedName: '奶茶',
+            originalPriceText: '18元',
+            originalPrice: 18,
+            rawPromotionText: '第二件半价'
+        }, 0, 1, 'CNY');
+
+        assert.equal(normalized.discountRules.length, 1);
+        assert.equal(normalized.discountRules[0].type, 'nth_item_discount');
+        assert.equal(normalized.discountRules[0].appliesToQuantity, 2);
+        assert.equal(normalized.discountRules[0].discountPercent, 50);
+    } finally {
+        restore();
+    }
+});
+
 test('GET /health returns request id header', async () => {
     const { backend, restore } = loadBackend();
     const server = await startTestServer(backend.app);
@@ -205,7 +336,7 @@ test('GET /api/v1/exchange-rate applies general rate limiting', async () => {
     }
 });
 
-test('POST /api/v1/menu/parse rejects unsupported file types before OCR', async () => {
+test('POST /api/v1/menu/parse rejects unsupported file types before model parsing', async () => {
     const { backend, restore } = loadBackend();
     const server = await startTestServer(backend.app);
     try {

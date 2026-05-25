@@ -137,13 +137,44 @@ function normalizeBonusItem(bonusItem) {
   };
 }
 
+function normalizeDiscountRule(rule, index) {
+  const originalLabel = toText(rule && (rule.originalLabel || rule.label || rule.rawRuleText));
+  const translatedLabel = toText(rule && (rule.translatedLabel || rule.label), originalLabel);
+  const type = toText(rule && (rule.type || rule.ruleType), 'raw').replace(/-/g, '_');
+
+  if (!originalLabel && !translatedLabel && !toText(rule && rule.rawRuleText)) {
+    return null;
+  }
+
+  return {
+    id: toText(rule && rule.id, `discount-${index + 1}`),
+    type,
+    originalLabel,
+    translatedLabel,
+    rawRuleText: toText(rule && rule.rawRuleText),
+    minQuantity: toOptionalNumber(rule && rule.minQuantity),
+    paidQuantity: toOptionalNumber(rule && rule.paidQuantity),
+    freeQuantity: toOptionalNumber(rule && rule.freeQuantity),
+    appliesToQuantity: toOptionalNumber(rule && rule.appliesToQuantity),
+    minSpend: toOptionalNumber(rule && rule.minSpend),
+    originalPriceText: toText(rule && rule.originalPriceText),
+    originalPrice: toOptionalNumber(rule && rule.originalPrice),
+    convertedPrice: toOptionalNumber(rule && rule.convertedPrice),
+    discountAmountText: toText(rule && rule.discountAmountText),
+    discountAmount: toOptionalNumber(rule && rule.discountAmount),
+    convertedDiscountAmount: toOptionalNumber(rule && rule.convertedDiscountAmount),
+    discountPercent: toOptionalNumber(rule && rule.discountPercent),
+    note: toText(rule && rule.note)
+  };
+}
+
 function inferItemType(item, tiers, bundleItems) {
   const itemType = toText(item && item.itemType).toLowerCase();
-  if (itemType === 'single' || itemType === 'tiered' || itemType === 'bundle') {
-    return itemType;
-  }
+  if (itemType === 'bundle') return 'bundle';
   if (bundleItems.length) return 'bundle';
-  if (tiers.length) return 'tiered';
+  if (itemType === 'tiered' && tiers.length > 1) return 'tiered';
+  if (itemType === 'single') return 'single';
+  if (tiers.length > 1) return 'tiered';
   return 'single';
 }
 
@@ -179,10 +210,13 @@ function withMenuItemIds(items) {
     const bonusItems = Array.isArray(item && item.bonusItems)
       ? item.bonusItems.map((bonusItem) => normalizeBonusItem(bonusItem)).filter(Boolean)
       : [];
+    const discountRules = Array.isArray(item && item.discountRules)
+      ? item.discountRules.map((rule, ruleIndex) => normalizeDiscountRule(rule, ruleIndex)).filter(Boolean)
+      : [];
     const itemType = inferItemType(item, tiers, bundleItems);
     const displayPrices = inferDisplayPrices(item, tiers);
     const hasStructuredPromotion = Boolean(
-      itemType !== 'single' || tiers.length || bundleItems.length || addOns.length || bonusItems.length
+      itemType !== 'single' || tiers.length || bundleItems.length || addOns.length || bonusItems.length || discountRules.length
     );
     const parseMode = toText(item && item.parseMode, hasStructuredPromotion ? 'structured' : 'basic');
 
@@ -202,6 +236,7 @@ function withMenuItemIds(items) {
       bundleItems,
       addOns,
       bonusItems,
+      discountRules,
       promotionSummary: toText(item && item.promotionSummary),
       rawPromotionText: toText(item && item.rawPromotionText),
       parseMode,
@@ -210,7 +245,7 @@ function withMenuItemIds(items) {
   });
 }
 
-function resolveCartUnitPrice(item, key) {
+function resolveCartUnitPriceParts(item, key) {
   const selectedOption = item.selectedOption || item.selectedTier || {};
   const directSelected = toOptionalNumber(selectedOption[key]);
   const addOnDeltaKey = key === 'originalPrice' ? 'originalPriceDelta' : 'convertedPriceDelta';
@@ -219,31 +254,99 @@ function resolveCartUnitPrice(item, key) {
     (sum, addOn) => sum + toFiniteNumber(addOn && addOn[addOnDeltaKey], 0),
     0
   );
+  let basePrice = null;
 
   if (directSelected !== null) {
-    return directSelected + addOnTotal;
+    basePrice = directSelected;
+  } else {
+    const displayValue = toOptionalNumber(item[`display${key[0].toUpperCase()}${key.slice(1)}`]);
+    basePrice = displayValue !== null ? displayValue : toFiniteNumber(item[key], 0);
   }
 
-  const displayValue = toOptionalNumber(item[`display${key[0].toUpperCase()}${key.slice(1)}`]);
-  if (displayValue !== null) {
-    return displayValue + addOnTotal;
+  return {
+    basePrice: toFiniteNumber(basePrice, 0),
+    addOnTotal,
+    unitPrice: toFiniteNumber(basePrice, 0) + addOnTotal,
+    hasSelectedOption: Boolean(selectedOption && selectedOption.id)
+  };
+}
+
+function applyDiscountRulesToSubtotal(baseUnitPrice, quantity, rules = [], key = 'originalPrice') {
+  const safeQuantity = Math.max(0, Math.floor(toFiniteNumber(quantity, 0)));
+  const unitPrice = toFiniteNumber(baseUnitPrice, 0);
+  const baseSubtotal = unitPrice * safeQuantity;
+  if (!safeQuantity || !unitPrice || !rules.length) {
+    return baseSubtotal;
   }
 
-  return toFiniteNumber(item[key], 0) + addOnTotal;
+  const fixedPriceKey = key === 'originalPrice' ? 'originalPrice' : 'convertedPrice';
+  const discountAmountKey = key === 'originalPrice' ? 'discountAmount' : 'convertedDiscountAmount';
+  const candidates = [baseSubtotal];
+
+  rules.forEach((rule) => {
+    const type = toText(rule && rule.type).replace(/-/g, '_');
+    const minQuantity = Math.max(0, Math.floor(toFiniteNumber(rule && rule.minQuantity, 0)));
+    const paidQuantity = Math.max(0, Math.floor(toFiniteNumber(rule && rule.paidQuantity, 0)));
+    const freeQuantity = Math.max(0, Math.floor(toFiniteNumber(rule && rule.freeQuantity, 0)));
+    const appliesToQuantity = Math.max(0, Math.floor(toFiniteNumber(rule && rule.appliesToQuantity, 0)));
+    const discountPercent = Math.min(100, Math.max(0, toFiniteNumber(rule && rule.discountPercent, 0)));
+    const fixedPrice = toOptionalNumber(rule && rule[fixedPriceKey]);
+    const discountAmount = toOptionalNumber(rule && rule[discountAmountKey]);
+
+    if (type === 'bundle_price' && minQuantity > 1 && fixedPrice !== null) {
+      const groupCount = Math.floor(safeQuantity / minQuantity);
+      const remainder = safeQuantity % minQuantity;
+      candidates.push(groupCount * fixedPrice + remainder * unitPrice);
+      return;
+    }
+
+    if (type === 'buy_x_get_y' && paidQuantity > 0 && freeQuantity > 0) {
+      const cycleQuantity = paidQuantity + freeQuantity;
+      const cycleCount = Math.floor(safeQuantity / cycleQuantity);
+      const remainder = safeQuantity % cycleQuantity;
+      const paidUnits = cycleCount * paidQuantity + Math.min(remainder, paidQuantity);
+      candidates.push(paidUnits * unitPrice);
+      return;
+    }
+
+    if (type === 'nth_item_discount' && appliesToQuantity > 1 && discountPercent > 0) {
+      const discountedUnits = Math.floor(safeQuantity / appliesToQuantity);
+      candidates.push(baseSubtotal - discountedUnits * unitPrice * (discountPercent / 100));
+      return;
+    }
+
+    if (type === 'percentage_discount' && discountPercent > 0 && (!minQuantity || safeQuantity >= minQuantity)) {
+      candidates.push(baseSubtotal * (1 - discountPercent / 100));
+      return;
+    }
+
+    if (type === 'amount_off' && discountAmount !== null && discountAmount > 0) {
+      const discountTimes = minQuantity > 0 ? Math.floor(safeQuantity / minQuantity) : 1;
+      candidates.push(baseSubtotal - discountTimes * discountAmount);
+    }
+  });
+
+  return Math.max(0, Math.min(...candidates));
 }
 
 function getCartItemTotals(orderItem) {
   const quantity = toFiniteNumber(orderItem && orderItem.quantity, 0);
   const item = (orderItem && orderItem.menuItem) || {};
-  const unitOriginal = resolveCartUnitPrice(item, 'originalPrice');
-  const unitConverted = resolveCartUnitPrice(item, 'convertedPrice');
+  const originalParts = resolveCartUnitPriceParts(item, 'originalPrice');
+  const convertedParts = resolveCartUnitPriceParts(item, 'convertedPrice');
+  const discountRules = originalParts.hasSelectedOption ? [] : (item.discountRules || []);
+  const discountedOriginalBase = applyDiscountRulesToSubtotal(originalParts.basePrice, quantity, discountRules, 'originalPrice');
+  const discountedConvertedBase = applyDiscountRulesToSubtotal(convertedParts.basePrice, quantity, discountRules, 'convertedPrice');
+  const totalOriginal = discountedOriginalBase + originalParts.addOnTotal * quantity;
+  const totalConverted = discountedConvertedBase + convertedParts.addOnTotal * quantity;
 
   return {
     quantity,
-    unitOriginal,
-    unitConverted,
-    totalOriginal: unitOriginal * quantity,
-    totalConverted: unitConverted * quantity
+    unitOriginal: quantity ? totalOriginal / quantity : originalParts.unitPrice,
+    unitConverted: quantity ? totalConverted / quantity : convertedParts.unitPrice,
+    totalOriginal,
+    totalConverted,
+    discountApplied: discountRules.length > 0 && totalOriginal < originalParts.unitPrice * quantity
   };
 }
 

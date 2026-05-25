@@ -1,7 +1,6 @@
-const { buildOrderText, formatMoney, getCartTotals, getCurrencyFractionDigits } = require('../../utils/format');
+const { formatMoney, getCartTotals, getCurrencyFractionDigits } = require('../../utils/format');
 const { getSystemCopy, getReceiptSourceCopy } = require('../../utils/i18n');
-
-const app = getApp();
+const store = require('../../utils/store');
 
 function getTierLabel(tier = {}) {
   return tier.translatedLabel || tier.label || tier.originalLabel || '';
@@ -23,8 +22,16 @@ function getBonusLabel(bonusItem = {}) {
   return bonusItem.translatedLabel || bonusItem.label || bonusItem.originalLabel || '';
 }
 
+function getDiscountRuleLabel(rule = {}) {
+  return rule.translatedLabel || rule.label || rule.originalLabel || rule.rawRuleText || '';
+}
+
 function getOriginalBonusLabel(bonusItem = {}) {
   return bonusItem.originalLabel || bonusItem.label || bonusItem.translatedLabel || '';
+}
+
+function getOriginalDiscountRuleLabel(rule = {}) {
+  return rule.originalLabel || rule.rawRuleText || rule.label || rule.translatedLabel || '';
 }
 
 function getBundleItemLabel(bundleItem = {}) {
@@ -82,6 +89,10 @@ function buildReceiptItems(cart, sourceLanguage) {
       detailLines.push((menuItem.bonusItems || []).map(getOriginalBonusLabel).join(' / '));
     }
 
+    if ((menuItem.discountRules || []).length) {
+      detailLines.push((menuItem.discountRules || []).map(getOriginalDiscountRuleLabel).join(' / '));
+    }
+
     if (menuItem.rawPromotionText && menuItem.parseMode !== 'structured') {
       detailLines.push(menuItem.rawPromotionText);
     }
@@ -93,7 +104,7 @@ function buildReceiptItems(cart, sourceLanguage) {
       quantity,
       waiterSummary: buildWaiterSummary(quantity, selectedTierLabel, sourceLanguage),
       detailLines,
-      detailOrderText: `${orderItem.quantity} x ${menuItem.translatedName || menuItem.originalName || ''}${getTierLabel(menuItem.selectedOption || menuItem.selectedTier || {}) ? ` (${getTierLabel(menuItem.selectedOption || menuItem.selectedTier || {})})` : ''}`
+      detailOrderText: `${orderItem.quantity} x ${menuItem.translatedName || menuItem.originalName || ''}${getTierLabel(menuItem.selectedOption || menuItem.selectedTier || {}) ? ` (${getTierLabel(menuItem.selectedOption || menuItem.selectedTier || {})})` : ''}${(menuItem.discountRules || []).length ? ` - ${(menuItem.discountRules || []).map(getDiscountRuleLabel).join(' / ')}` : ''}`
     };
   });
 }
@@ -129,12 +140,10 @@ Page({
     totalConvertedText: '0.00',
     itemCountLabel: '0 items',
     totalQuantity: 0,
-    orderText: '',
     receiptItems: [],
     titleText: '',
     thanksText: '',
     detailLabelText: '',
-    copyActionText: '',
     totalLabelText: '',
     detailHintText: '',
     originalAmountText: '',
@@ -142,12 +151,11 @@ Page({
     sourceLanguage: 'en',
     quantityUnitText: '',
     receiptCode: '',
-    printedAt: '',
-    copiedToastText: ''
+    printedAt: ''
   },
 
   onShow() {
-    const state = app.globalData;
+    const state = store.getState();
     if (!state.cart.length) {
       wx.navigateBack();
       return;
@@ -159,7 +167,6 @@ Page({
     const sourceLanguage = state.sourceLanguage || 'en';
     const systemCopy = getSystemCopy(state.systemLanguage);
     const sourceCopy = getReceiptSourceCopy(sourceLanguage);
-    const orderText = buildOrderText(cart, 'translatedName');
     const receiptItems = buildReceiptItems(cart, sourceLanguage);
     const quantityLabel = `${totalQuantity} ${totalQuantity === 1 ? systemCopy.itemSingular : systemCopy.itemPlural}`;
     const originalDigits = getCurrencyFractionDigits(state.originalCurrency, state.originalCurrencyMeta);
@@ -174,12 +181,10 @@ Page({
       totalConvertedText: formatMoney(totals.converted, 2),
       itemCountLabel: quantityLabel,
       totalQuantity,
-      orderText,
       receiptItems,
       titleText: sourceCopy.title,
       thanksText: sourceCopy.thanks,
       detailLabelText: systemCopy.orderText,
-      copyActionText: systemCopy.copyOrder,
       totalLabelText: systemCopy.total,
       detailHintText: systemCopy.cartSummaryHint,
       originalAmountText: `${state.originalCurrency} ${formatMoney(totals.original, originalDigits)}`,
@@ -187,23 +192,10 @@ Page({
       sourceLanguage,
       quantityUnitText: systemCopy.itemsUnit,
       receiptCode: buildReceiptCode(cart),
-      printedAt: buildPrintedAt(),
-      copiedToastText: systemCopy.copied
+      printedAt: buildPrintedAt()
     });
 
     wx.setNavigationBarTitle({ title: systemCopy.receiptTitle });
-  },
-
-  copyOrderText() {
-    wx.setClipboardData({
-      data: this.data.orderText,
-      success: () => {
-        wx.showToast({
-          title: this.data.copiedToastText,
-          icon: 'success'
-        });
-      }
-    });
   },
 
   backToMenu() {

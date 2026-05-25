@@ -157,7 +157,6 @@
 }
 
 .detail-card__label,
-.detail-card__action,
 .detail-card__meta,
 .detail-card__hint,
 .detail-card__total-label {
@@ -169,10 +168,6 @@
   display: block;
   margin-top: 6rpx;
   line-height: 1.5;
-}
-
-.detail-card__action {
-  color: rgba(37, 43, 77, 0.78);
 }
 
 .detail-card__order-list {
@@ -229,7 +224,7 @@
   bottom: 22rpx;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 24rpx;
   padding-bottom: calc(8rpx + env(safe-area-inset-bottom));
 }
@@ -244,30 +239,4 @@
   font-weight: 500;
   line-height: 1.2;
   color: #252b4d;
-}
-
-.bottom-dock__action {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 12rpx;
-  min-width: 204rpx;
-  height: 76rpx;
-  padding: 0 28rpx;
-  border-radius: 999rpx;
-  background: #10162f;
-  box-shadow: 0 16rpx 34rpx rgba(16, 22, 47, 0.2);
-}
-
-.bottom-dock__action-dot {
-  width: 18rpx;
-  height: 18rpx;
-  border-radius: 50%;
-  background: #ffffff;
-}
-
-.bottom-dock__action-text {
-  font-size: 28rpx;
-  font-weight: 600;
-  color: #ffffff;
 }

@@ -2,6 +2,7 @@ const { formatMoney, getCartItemTotals, getCartTotals, getCurrencyFractionDigits
 const { fetchExchangeRate } = require('../../utils/api');
 const { getSystemCopy, getCurrencyDisplayName, getCurrencyOptionList } = require('../../utils/i18n');
 const { CURRENCY_CODES } = require('../../utils/currency-data');
+const store = require('../../utils/store');
 
 const app = getApp();
 const CURRENCY_OPTIONS = CURRENCY_CODES;
@@ -22,6 +23,10 @@ function getBonusLabel(bonusItem = {}) {
   return bonusItem.translatedLabel || bonusItem.label || bonusItem.originalLabel || '';
 }
 
+function getDiscountRuleLabel(rule = {}) {
+  return rule.translatedLabel || rule.label || rule.originalLabel || rule.rawRuleText || '';
+}
+
 function getBundleItemLabel(bundleItem = {}) {
   const name = bundleItem.translatedName || bundleItem.originalName || '';
   const quantity = Number(bundleItem.quantity || 0);
@@ -34,6 +39,10 @@ function getItemTypeLabel(item, copy) {
   if (item.itemType === 'bundle') return copy.promotionBundle;
   if (item.itemType === 'tiered') return copy.promotionTiered;
   return copy.promotionSingle;
+}
+
+function itemRequiresSelection(item = {}) {
+  return (item.tiers || []).length > 1 || (item.addOns || []).length > 0;
 }
 
 function getCartEntryId(itemId, selectedOptionId, selectedAddOnIds) {
@@ -114,6 +123,18 @@ function repriceAddOn(addOn, exchangeRate) {
   };
 }
 
+function repriceDiscountRule(rule, exchangeRate) {
+  return {
+    ...rule,
+    convertedPrice: rule.originalPrice === null || rule.originalPrice === undefined
+      ? rule.convertedPrice
+      : toAmount(rule.originalPrice) * exchangeRate,
+    convertedDiscountAmount: rule.discountAmount === null || rule.discountAmount === undefined
+      ? rule.convertedDiscountAmount
+      : toAmount(rule.discountAmount) * exchangeRate
+  };
+}
+
 function repriceMenuItem(item, exchangeRate) {
   return {
     ...item,
@@ -121,6 +142,7 @@ function repriceMenuItem(item, exchangeRate) {
     displayConvertedPrice: toAmount(item.displayOriginalPrice ?? item.originalPrice) * exchangeRate,
     tiers: (item.tiers || []).map((tier) => repriceTier(tier, exchangeRate)),
     addOns: (item.addOns || []).map((addOn) => repriceAddOn(addOn, exchangeRate)),
+    discountRules: (item.discountRules || []).map((rule) => repriceDiscountRule(rule, exchangeRate)),
     selectedOption: item.selectedOption ? repriceTier(item.selectedOption, exchangeRate) : item.selectedOption,
     selectedTier: item.selectedTier ? repriceTier(item.selectedTier, exchangeRate) : item.selectedTier,
     selectedAddOns: (item.selectedAddOns || []).map((addOn) => repriceAddOn(addOn, exchangeRate))
@@ -156,8 +178,10 @@ function buildMenuDisplayItem(item, quantityById, currencies, copy) {
     })
     .join(' / ');
   const bonusSummaryText = (item.bonusItems || []).map(getBonusLabel).join(' / ');
+  const discountRuleSummaryText = (item.discountRules || []).map(getDiscountRuleLabel).filter(Boolean).join(' / ');
   const quantity = quantityById[item.id] || 0;
-  const isDirectStepper = item.itemType === 'single' && !(item.addOns || []).length;
+  const requiresSelection = itemRequiresSelection(item);
+  const isDirectStepper = !requiresSelection;
 
   return {
     ...item,
@@ -168,9 +192,10 @@ function buildMenuDisplayItem(item, quantityById, currencies, copy) {
     bundleSummaryText,
     addOnSummaryText,
     bonusSummaryText,
+    discountRuleSummaryText,
     itemTypeLabel: getItemTypeLabel(item, copy),
     isDirectStepper,
-    purchaseButtonText: quantity ? copy.addAnother : copy.selectOption,
+    purchaseButtonText: quantity ? copy.addAnother : (requiresSelection ? copy.selectOption : copy.confirmSelection),
     pricePrefixText: tierRows.length ? copy.priceFrom : ''
   };
 }
@@ -199,6 +224,10 @@ function buildCartSummaryItem(orderItem, currencies, copy) {
 
   if ((menuItem.bonusItems || []).length) {
     detailLines.push(`${copy.bonusRule}: ${(menuItem.bonusItems || []).map(getBonusLabel).join(' / ')}`);
+  }
+
+  if ((menuItem.discountRules || []).length) {
+    detailLines.push(`${copy.discountRule}: ${(menuItem.discountRules || []).map(getDiscountRuleLabel).join(' / ')}`);
   }
 
   if (menuItem.promotionSummary) {
@@ -252,11 +281,15 @@ Page({
     cartBadgeCount: 0,
     cartSummaryItems: [],
     lastError: '',
+    parseWarnings: [],
+    pageCount: 1,
     globalAddOns: [],
+    globalDiscountRules: [],
     globalPromotionText: '',
     visibleGlobalPromotionText: '',
     showGlobalRuleCard: false,
     globalAddOnSummary: '',
+    globalDiscountRuleSummary: '',
     copy: getSystemCopy('zh-CN'),
     cartSheetVisible: false,
     selectorVisible: false,
@@ -266,6 +299,7 @@ Page({
     selectorAddOnRows: [],
     selectorBundleSummaryText: '',
     selectorBonusSummaryText: '',
+    selectorDiscountRuleSummaryText: '',
     selectorSelectedTierId: '',
     selectorSelectedAddOnIds: [],
     selectorPreviewOriginalText: '0',
@@ -273,7 +307,7 @@ Page({
   },
 
   onShow() {
-    const state = app.globalData;
+    const state = store.getState();
     if (!state.menuItems.length) {
       wx.redirectTo({ url: '/pages/index/index' });
       return;
@@ -284,7 +318,9 @@ Page({
         menuItems: state.menuItems,
         cart: state.cart,
         globalAddOns: state.globalAddOns || [],
+        globalDiscountRules: state.globalDiscountRules || [],
         globalPromotionText: state.globalPromotionText || '',
+        parseWarnings: state.parseWarnings || [],
         copy: getSystemCopy(state.systemLanguage),
         originalCurrency: state.originalCurrency,
         originalCurrencyMeta: state.originalCurrencyMeta || { code: state.originalCurrency, fractionDigits: 2 },
@@ -293,7 +329,8 @@ Page({
         sourceCurrencyIndex: getCurrencyIndex(state.originalCurrency),
         targetCurrencyIndex: getCurrencyIndex(state.targetCurrency),
         exchangeRate: Number(state.exchangeRate || 1).toFixed(4),
-        lastError: state.lastError || ''
+        lastError: state.lastError || '',
+        pageCount: state.pageCount || 1
       ,
         ...buildCurrencyUiState(state.systemLanguage, state.originalCurrency, state.targetCurrency),
         ...buildCurrencyDraftState(state.systemLanguage, state.originalCurrency, state.targetCurrency)
@@ -308,8 +345,8 @@ Page({
   backHome() {
     app.setMenuResult({
       items: [],
-      systemLanguage: app.globalData.systemLanguage || 'zh-CN',
-      sourceLanguage: app.globalData.sourceLanguage,
+      systemLanguage: store.getSystemLanguage(),
+      sourceLanguage: store.getState().sourceLanguage,
       originalCurrency: 'USD',
       targetCurrency: 'CNY',
       exchangeRate: 1
@@ -334,7 +371,7 @@ Page({
   },
 
   syncCurrencyDraftFromCurrent() {
-    const language = app.globalData.systemLanguage || 'zh-CN';
+    const language = store.getSystemLanguage();
     this.setData(buildCurrencyDraftState(language, this.data.originalCurrency, this.data.targetCurrency));
   },
 
@@ -370,7 +407,7 @@ Page({
   },
 
   swapCurrencyDraft() {
-    const language = app.globalData.systemLanguage || 'zh-CN';
+    const language = store.getSystemLanguage();
     this.setData(
       buildCurrencyDraftState(language, this.data.draftTargetCurrency, this.data.draftOriginalCurrency)
     );
@@ -414,7 +451,7 @@ Page({
     const item = this.findItem(event.currentTarget.dataset.id);
     if (!item) return;
 
-    if (item.itemType !== 'single' || (item.addOns || []).length) {
+    if (itemRequiresSelection(item)) {
       this.openSelector(event);
       return;
     }
@@ -483,6 +520,10 @@ Page({
   openSelector(event) {
     const item = this.findItem(event.currentTarget.dataset.id);
     if (!item) return;
+    if (!itemRequiresSelection(item)) {
+      this.addToCart(event);
+      return;
+    }
 
     this.setData(
       {
@@ -506,6 +547,7 @@ Page({
       selectorAddOnRows: [],
       selectorBundleSummaryText: '',
       selectorBonusSummaryText: '',
+      selectorDiscountRuleSummaryText: '',
       selectorSelectedTierId: '',
       selectorSelectedAddOnIds: [],
       selectorPreviewOriginalText: '0',
@@ -638,13 +680,14 @@ Page({
       })),
       selectorBundleSummaryText: (item.bundleItems || []).map(getBundleItemLabel).join(' / '),
       selectorBonusSummaryText: (item.bonusItems || []).map(getBonusLabel).join(' / '),
+      selectorDiscountRuleSummaryText: (item.discountRules || []).map(getDiscountRuleLabel).filter(Boolean).join(' / '),
       selectorPreviewOriginalText: formatMoney(baseOriginalPrice + addOnOriginalTotal, originalDigits),
       selectorPreviewConvertedText: formatMoney(baseConvertedPrice + addOnConvertedTotal, 2)
     });
   },
 
   syncCart(cart, callback) {
-    app.globalData.cart = cart;
+    store.setCart(cart);
     this.setData({
       cart,
       cartSheetVisible: cart.length ? this.data.cartSheetVisible : false
@@ -679,28 +722,33 @@ Page({
       const menuItems = (this.data.menuItems || []).map((item) => repriceMenuItem(item, exchangeRate));
       const cart = repriceCart(this.data.cart || [], exchangeRate);
       const globalAddOns = (this.data.globalAddOns || []).map((addOn) => repriceAddOn(addOn, exchangeRate));
+      const globalDiscountRules = (this.data.globalDiscountRules || []).map((rule) => repriceDiscountRule(rule, exchangeRate));
       const selectorItem = this.data.selectorItem
         ? menuItems.find((item) => item.id === this.data.selectorItem.id) || null
         : null;
-      const language = app.globalData.systemLanguage || 'zh-CN';
+      const language = store.getSystemLanguage();
 
-      app.globalData.menuItems = menuItems;
-      app.globalData.cart = cart;
-      app.globalData.globalAddOns = globalAddOns;
-      app.globalData.originalCurrency = originalCurrency;
-      app.globalData.originalCurrencyMeta = rateResult.originalCurrencyMeta || { code: originalCurrency, fractionDigits: 2 };
-      app.globalData.targetCurrency = targetCurrency;
-      app.globalData.targetCurrencyMeta = rateResult.targetCurrencyMeta || { code: targetCurrency, fractionDigits: 2 };
-      app.globalData.exchangeRate = exchangeRate;
+      store.setState({
+        menuItems,
+        cart,
+        globalAddOns,
+        globalDiscountRules,
+        originalCurrency,
+        originalCurrencyMeta: rateResult.originalCurrencyMeta || { code: originalCurrency, fractionDigits: 2 },
+        targetCurrency,
+        targetCurrencyMeta: rateResult.targetCurrencyMeta || { code: targetCurrency, fractionDigits: 2 },
+        exchangeRate
+      });
 
       this.setData({
         menuItems,
         cart,
         globalAddOns,
+        globalDiscountRules,
         originalCurrency,
-        originalCurrencyMeta: app.globalData.originalCurrencyMeta,
+        originalCurrencyMeta: store.getState().originalCurrencyMeta,
         targetCurrency,
-        targetCurrencyMeta: app.globalData.targetCurrencyMeta,
+        targetCurrencyMeta: store.getState().targetCurrencyMeta,
         ...buildCurrencyUiState(language, originalCurrency, targetCurrency),
         ...buildCurrencyDraftState(language, originalCurrency, targetCurrency),
         sourceCurrencyIndex: getCurrencyIndex(originalCurrency),
@@ -750,7 +798,11 @@ Page({
       .filter(Boolean)
       .join(' / ');
     const visibleGlobalPromotionText = getVisibleGlobalPromotionText(this.data.globalPromotionText);
-    const showGlobalRuleCard = Boolean(globalAddOnSummary || visibleGlobalPromotionText);
+    const globalDiscountRuleSummary = (this.data.globalDiscountRules || [])
+      .map(getDiscountRuleLabel)
+      .filter(Boolean)
+      .join(' / ');
+    const showGlobalRuleCard = Boolean(globalAddOnSummary || globalDiscountRuleSummary || visibleGlobalPromotionText);
     const cartBadgeCount = this.data.cart.reduce(
       (sum, orderItem) => sum + Number(orderItem.quantity || 0),
       0
@@ -773,6 +825,7 @@ Page({
       totalOriginalText: formatMoney(totals.original, getCurrencyFractionDigits(this.data.originalCurrency, this.data.originalCurrencyMeta)),
       totalConvertedText: formatMoney(totals.converted, 2),
       globalAddOnSummary,
+      globalDiscountRuleSummary,
       visibleGlobalPromotionText,
       showGlobalRuleCard,
       cartBadgeCount,

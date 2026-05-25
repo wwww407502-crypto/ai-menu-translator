@@ -49,6 +49,17 @@
   white-space: nowrap;
 }
 
+.store-card__pages {
+  display: inline-block;
+  margin-top: 6rpx;
+  padding: 4rpx 14rpx;
+  font-size: 20rpx;
+  font-weight: 600;
+  color: #007aff;
+  background: #e8f2ff;
+  border-radius: 8rpx;
+}
+
 .store-card__actions {
   display: flex;
   align-items: center;
@@ -184,6 +195,12 @@
 
 .warning--rule {
   gap: 10rpx;
+}
+
+.warning--parse {
+  gap: 12rpx;
+  max-height: 300rpx;
+  overflow-y: auto;
 }
 
 .warning__label {

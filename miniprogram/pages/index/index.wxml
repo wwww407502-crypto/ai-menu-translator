@@ -2,7 +2,7 @@
   <view class="home__glow home__glow--one"></view>
   <view class="home__glow home__glow--two"></view>
 
-  <view class="home__content" wx:if="{{!isProcessing}}">
+  <view class="home__content" wx:if="{{!isProcessing && !multiMode}}">
     <view class="hero">
       <text class="hero__title">{{copy.appTitle}}</text>
     </view>
@@ -15,12 +15,57 @@
       <button class="secondary-action" bindtap="chooseFromAlbum">
         <text class="action-title">{{copy.importAlbum}}</text>
       </button>
+
+      <button class="tertiary-action" bindtap="chooseMultipleFromAlbum">
+        <text class="action-title">{{copy.importMultiAlbum}}</text>
+        <text class="action-subtitle">{{copy.multiModeHint}}</text>
+      </button>
     </view>
 
     <view class="notice" wx:if="{{errorMessage}}">
       <text class="notice__label">{{copy.notice}}</text>
       <text class="notice__text">{{errorMessage}}</text>
     </view>
+  </view>
+
+  <view class="multi-select" wx:if="{{multiMode && !isProcessing}}">
+    <view class="multi-select__header">
+      <text class="multi-select__title">
+        {{copy.multiSelectTitle.replace('{count}', selectedFiles.length)}}
+      </text>
+      <text class="multi-select__hint">{{copy.multiModeHint}}</text>
+    </view>
+
+    <view class="multi-select__list">
+      <view class="multi-select__item" wx:for="{{selectedFiles}}" wx:key="index">
+        <image class="multi-select__thumb" src="{{item}}" mode="aspectFill" />
+        <text class="multi-select__label">Page {{index + 1}}</text>
+        <button class="multi-select__remove" data-index="{{index}}" bindtap="removeSelectedFile">
+          {{copy.removeFile}}
+        </button>
+      </view>
+    </view>
+
+    <view class="multi-select__actions">
+      <button class="secondary-action" bindtap="chooseMultipleFromAlbum">
+        <text>+ Add More Pages</text>
+      </button>
+      <button class="primary-action" bindtap="processMultiImages">
+        <text class="action-title">{{copy.startMultiUpload}}</text>
+      </button>
+      <button class="tertiary-action" bindtap="cancelMultiMode">
+        <text>{{copy.cancel}}</text>
+      </button>
+    </view>
+  </view>
+
+  <view class="processing" wx:elif="{{multiMode && isProcessing}}">
+    <view class="processing__ring"></view>
+    <text class="processing__eyebrow">{{copy.processingEyebrow}}</text>
+    <text class="processing__title">
+      {{copy.uploadingProgress.replace('{current}', uploadingCount).replace('{total}', uploadTotal)}}
+    </text>
+    <text class="processing__desc">{{copy.processingDesc}}</text>
   </view>
 
   <view class="processing" wx:else>
