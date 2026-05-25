@@ -52,7 +52,7 @@
 ### 1. 克隆项目
 
 ```bash
-git clone https://github.com/你的用户名/ai-menu-translator.git
+git clone https://github.com/wwww407502-crypto/ai-menu-translator.git
 cd ai-menu-translator
 ```
 
