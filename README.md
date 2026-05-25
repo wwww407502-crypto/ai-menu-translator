@@ -52,8 +52,8 @@
 ### 1. 克隆项目
 
 ```bash
-git clone https://github.com/你的用户名/自动菜单翻译.git
-cd 自动菜单翻译
+git clone https://github.com/你的用户名/ai-menu-translator.git
+cd ai-menu-translator
 ```
 
 ### 2. 配置后端
